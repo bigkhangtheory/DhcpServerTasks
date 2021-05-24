@@ -84,10 +84,10 @@
     DscResourcesToExport = @('*')
 
     # List of all modules packaged with this module
-    # ModuleList = @()
+    ModuleList           = @('*')
 
     # List of all files packaged with this module
-    # FileList = @()
+    FileList             = @('*')
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData          = @{
@@ -104,7 +104,7 @@
             ProjectUri                 = 'https://prod1gitlab.mapcom.local/dsc/configurations/DhcpServerTasks.git'
 
             # A URL to an icon representing this module.
-            # IconUri = ''
+            IconUri                    = 'https://dsccommunity.org/images/DSC_Logo_300p.png'
 
             # ReleaseNotes of this module
             # ReleaseNotes = ''
