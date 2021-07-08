@@ -12,7 +12,7 @@
     # RootModule = ''
 
     # Version number of this module.
-    ModuleVersion        = '0.5.0'
+    ModuleVersion        = '0.7.0'
 
     # Supported PSEditions
     # CompatiblePSEditions = @()
@@ -84,10 +84,10 @@
     DscResourcesToExport = @('*')
 
     # List of all modules packaged with this module
-    ModuleList           = @('*')
+    #ModuleList           = @('*')
 
     # List of all files packaged with this module
-    FileList             = @('*')
+    #FileList             = @('*')
 
     # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
     PrivateData          = @{

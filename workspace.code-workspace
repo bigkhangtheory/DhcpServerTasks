@@ -11,7 +11,7 @@
     "plantuml.render": "Local",
     "editor.fontFamily": "'CaskaydiaCove NF',Consolas, 'Courier New', monospace",
     "powershell.codeFormatting.autoCorrectAliases": true,
-    "powershell.codeFormatting.preset": "OTBS",
+    "powershell.codeFormatting.preset": "Allman",
     "powershell.codeFormatting.trimWhitespaceAroundPipe": true,
     "powershell.codeFormatting.useCorrectCasing": true,
     "powershell.codeFormatting.useConstantStrings": true,

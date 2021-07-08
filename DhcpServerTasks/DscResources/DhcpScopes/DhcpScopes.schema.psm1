@@ -12,7 +12,8 @@ configuration DhcpScopes
     Import-DscResource -ModuleName xDhcpServer
     Import-DscResource -ModuleName PsDesiredStateConfiguration
 
-    if ($DomainCredential) {
+    if ($DomainCredential)
+    {
         xDhcpServerAuthorization "$($node.Name)_DhcpServerActivation" {
             Ensure               = 'Present'
             PsDscRunAsCredential = $DomainCredential
@@ -20,12 +21,21 @@ configuration DhcpScopes
         }
     }
 
-    foreach ($scope in $Scopes) {
-        if (-not $scope.ContainsKey('Ensure')) {
-            $scope.Ensure = 'Present'
+    foreach ($s in $Scopes)
+    {
+        if (-not $s.ContainsKey('Ensure'))
+        {
+            $s.Ensure = 'Present'
         }
 
-        $executionName = "$($node.Name)_$($scope.ScopeId)"
-        (Get-DscSplattedResource -ResourceName xDhcpServerScope -ExecutionName $executionName -Properties $scope -NoInvoke).Invoke($scope)
+        $executionName = "$($node.Name)_$($s.ScopeId -replace '[-().:\s]', '_')"
+
+        $Splatting = @{
+            ResourceName  = 'xDhcpServerScope'
+            ExecutionName = $executionName
+            Properties    = $s
+            NoInvoke      = $true
+        }
+        (Get-DscSplattedResource @Splatting).Invoke($s)
     }
 }
