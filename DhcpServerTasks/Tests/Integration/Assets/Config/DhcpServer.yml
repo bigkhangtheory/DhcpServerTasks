@@ -7,6 +7,23 @@ Scopes:
     LeaseDuration: 08:00:00
     State: Active
     AddressFamily: IPv4
+    ScopeExclusions:
+      - IPStartRange: 192.169.1.1
+        IPEndRange: 192.169.1.1
+        Ensure: Present
+    ScopeOptions:    
+      - OptionId: 3
+        Value: 192.19.1.1
+        Ensure: Present
+    ScopeReservations:
+      - Name: PrinterDevice
+        IPAddress: 192.169.1.2
+        ClientMacAddress: 00155D8A54A1
+        Ensure: Present
+      - Name: ScannerDevice
+        IPAddress: 192.169.1.3
+        ClientMacAddress: 00155D8A54A2
+
   - ScopeId: 192.169.2.0
     IPStartRange: 192.169.2.1
     IPEndRange: 192.169.2.254
