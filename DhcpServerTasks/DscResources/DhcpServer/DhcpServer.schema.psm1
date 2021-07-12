@@ -101,7 +101,7 @@ configuration DhcpServer
             foreach ($option in $myScopeOptions)
             {
                 # formulate execution name
-                $executionName = "$($node.Name)_option_$($option.OptionId)"
+                $executionName = "$($node.Name)_$($s.ScopeId -replace '[-().:\s]', '_')_option_$($option.OptionId)"
 
                 # if VendorClass not specified, set to Standard Class with empty string
                 if ($null -eq $option.VendorClass)
