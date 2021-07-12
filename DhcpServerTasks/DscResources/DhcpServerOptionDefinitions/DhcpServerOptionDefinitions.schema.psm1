@@ -3,10 +3,10 @@ configuration DhcpServerOptionDefinitions
     param
     (
         [hashtable[]]
-        $ServerOptionDefinitions
+        $OptionDefinitions
     )
 
-<#
+    <#
     AddressFamily = [string]{ IPv4 }
     Name = [string]
     OptionId = [UInt32]
@@ -22,12 +22,45 @@ configuration DhcpServerOptionDefinitions
     Import-DscResource -ModuleName xDhcpServer
     Import-DscResource -ModuleName PsDesiredStateConfiguration
 
-    foreach ($serverOptionDefinition in $ServerOptionDefinitions) {
-        if (-not $serverOptionDefinition.ContainsKey('Ensure')) {
-            $serverOptionDefinition.Ensure = 'Present'
+    # ensure Windows DHCP feature
+    WindowsFeature AddDhcp
+    {
+        Name   = 'DHCP'
+        Ensure = 'Present'
+    }
+    
+    foreach ($definition in $OptionDefinitions)
+    {
+        # remove case sensitivity of ordered Dictionary or Hashtables
+        $definition = @{ } + $definition
+
+        # if 'VendorClass' not specified, set to Standard Class with empty string
+        if ($null -eq $definition.VendorClass)
+        {
+            $definition.VendorClass = ''
+        }
+        
+        # if not specified, ensure 'Present' 
+        if (-not $definition.ContainsKey('Ensure'))
+        {
+            $definition.Ensure = 'Present'
         }
 
+        # formulate execution name
         $executionName = "$($node.Name)_$($serverOption.OptionId)"
-        (Get-DscSplattedResource -ResourceName xDhcpServerOptionDefinition -ExecutionName $executionName -Properties $serverOptionDefinition -NoInvoke).Invoke($serverOptionDefinition)
+
+        # create DSC configuration for DHCP Server option definition
+        xDhcpServerOptionDefinition "$executionName"
+        {
+            OptionId = $definition.OptionId
+            VendorClass = $definition.VendorClass
+            Name = $definition.Name
+            Type = $definition.Type 
+            MultiValued = $definition.MultiValued
+            Description = $definition.Description
+            AddressFamily = 'IPv4'
+            Ensure = $definition.Ensure
+            DependsOn = '[WindowsFeature]AddDhcp'
+        }
     }
 }

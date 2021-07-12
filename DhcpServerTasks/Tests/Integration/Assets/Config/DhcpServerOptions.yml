@@ -1,6 +1,7 @@
-ServerOptions:
+Options:
+  - OptionId: 6
+    Value:
+      - 172.16.2.1
+      - 172.16.1.74
   - OptionId: 15
-    AddressFamily: IPv4    
-    UserClass: ''
-    VendorClass: ''
     Value: contoso.com
