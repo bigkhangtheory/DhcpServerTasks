@@ -56,6 +56,6 @@
     # DSC Resources
     # -------------------------------------------------------------------------
     
-    xDhcpServer           = '3.0.0'
+    xDhcpServer           = '2021.7.0'
     # This module contains DSC resources for deployment and configuration of Microsoft DHCP Server
 }
