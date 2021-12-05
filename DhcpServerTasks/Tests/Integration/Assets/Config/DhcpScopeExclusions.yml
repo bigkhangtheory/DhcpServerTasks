@@ -1,5 +1,0 @@
-Scopes:
-  - ScopeId: 192.169.1.0
-    IPStartRange: 192.169.1.1
-    IPEndRange: 192.169.1.10
-    AddressFamily: IPv4

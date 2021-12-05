@@ -1,23 +1,63 @@
+<#
+    .DESCRIPTION
+        The DhcpServerOptionDefinitions DSC configuration manages definitions and types for DHCP lease options.
+
+    .PARAMETER OptionDefinitions
+        [System.Collections.Hashtable[]]
+        Specify a list of DHCP option definitions and types.
+
+    .PARAMETER OptionId
+        Key - UInt32
+        Option ID, specify a number between 1 and 255.
+
+    .PARAMETER VendorClass
+        Key - String
+        Vendor class. Use an empty string for standard option class.
+
+    .PARAMETER Name
+        Required - String
+        Option name.
+
+    .PARAMETER Type
+        Required - String
+        Allowed values: Byte, Word, Dword, DwordDword, IPv4Address, String, BinaryData, EncapsulatedData
+        Option data type.
+
+    .PARAMETER Multivalued
+        Write - Boolean
+        Whether option is multivalued or not.
+
+    .PARAMETER Description
+        Write - String
+        Option description.
+
+    .PARAMETER AddressFamily
+        Key - String
+        Allowed values: IPv4
+        Class address family. Currently needs to be IPv4.
+
+    .PARAMETER Ensure
+        Write - String
+        Allowed values: Present, Absent
+        Whether the DHCP server class should exist.
+
+    .NOTES
+        Requirements
+
+        - Target machine must be running Windows Server 2012 R2 or later.
+        - Target machine must be running at minimum Windows PowerShell 5.0.
+#>
+#Requires -Module xDhcpServer
+
+
 configuration DhcpServerOptionDefinitions
 {
     param
     (
-        [hashtable[]]
+        [Parameter()]
+        [System.Collections.Hashtable[]]
         $OptionDefinitions
     )
-
-    <#
-    AddressFamily = [string]{ IPv4 }
-    Name = [string]
-    OptionId = [UInt32]
-    Type = [string]{ BinaryData | Byte | Dword | DwordDword | EncapsulatedData | IPv4Address | String | Word }
-    VendorClass = [string]
-    [DependsOn = [string[]]]
-    [Description = [string]]
-    [Ensure = [string]{ Absent | Present }]
-    [Multivalued = [bool]]
-    [PsDscRunAsCredential = [PSCredential]]
-#>
 
     Import-DscResource -ModuleName xDhcpServer
     Import-DscResource -ModuleName PsDesiredStateConfiguration
@@ -28,39 +68,66 @@ configuration DhcpServerOptionDefinitions
         Name   = 'DHCP'
         Ensure = 'Present'
     }
-    
-    foreach ($definition in $OptionDefinitions)
+    $dependsOnAddDhcp = '[WindowsFeature]AddDhcp'
+
+    if ($PSBoundParameters.ContainsKey('OptionDefinitions'))
     {
-        # remove case sensitivity of ordered Dictionary or Hashtables
-        $definition = @{ } + $definition
-
-        # if 'VendorClass' not specified, set to Standard Class with empty string
-        if ($null -eq $definition.VendorClass)
+        foreach ($definition in $OptionDefinitions)
         {
-            $definition.VendorClass = ''
-        }
-        
-        # if not specified, ensure 'Present' 
-        if (-not $definition.ContainsKey('Ensure'))
-        {
-            $definition.Ensure = 'Present'
-        }
+            # remove case sensitivity of ordered Dictionary or Hashtables
+            $definition = @{ } + $definition
 
-        # formulate execution name
-        $executionName = "$($node.Name)_$($serverOption.OptionId)"
+            # the property 'OptionId' must be specified, otherwise fail
+            if (-not $definition.ContainsKey('OptionId'))
+            {
+                throw 'ERROR: The property OptionId is not defined.'
+            }
 
-        # create DSC configuration for DHCP Server option definition
-        xDhcpServerOptionDefinition "$executionName"
-        {
-            OptionId = $definition.OptionId
-            VendorClass = $definition.VendorClass
-            Name = $definition.Name
-            Type = $definition.Type 
-            MultiValued = $definition.MultiValued
-            Description = $definition.Description
-            AddressFamily = 'IPv4'
-            Ensure = $definition.Ensure
-            DependsOn = '[WindowsFeature]AddDhcp'
-        }
-    }
-}
+            # the property 'Type' must be specified, otherwise fail
+            if (-not $definition.ContainsKey('Type'))
+            {
+                throw 'ERROR: The property Type is not defined.'
+            }
+
+            # if 'VendorClass' not specified, set to Standard Class with empty string
+            if (-not $definition.ContainsKey('VendorClass'))
+            {
+                $definition.VendorClass = ''
+            }
+
+            # if 'MultiValued' not specified, default to $false
+            if (-not $definition.ContainsKey('MultiValued'))
+            {
+                $definition.MultiValued = $false
+            }
+
+            # if 'AddressFamily' not specified, default to IPv4
+            if (-not $definition.ContainsKey('AddressFamily'))
+            {
+                $definition.AddressFamily = 'IPv4'
+            }
+
+            # if not specified, ensure 'Present'
+            if (-not $definition.ContainsKey('Ensure'))
+            {
+                $definition.Ensure = 'Present'
+            }
+
+            # this resource depends on installation of DHCP server
+            $definition.DependsOn = $dependsOnAddDhcp
+
+            # formulate execution name
+            $executionName = "$("$($node.Name)_$($definition.OptionId)_$($definition.Type)_$($definition.Name)" -replace '[-().:\s]', '_')"
+
+            # create DSC configuration for DHCP Server option definition
+            $Splatting = @{
+                ResourceName  = 'xDhcpServerOptionDefinition'
+                ExecutionName = $executionName
+                Properties    = $definition
+                NoInvoke      = $true
+            }
+            (Get-DscSplattedResource @Splatting).Invoke($definition)
+
+        } #end foreach
+    } #end if
+} #end configuration

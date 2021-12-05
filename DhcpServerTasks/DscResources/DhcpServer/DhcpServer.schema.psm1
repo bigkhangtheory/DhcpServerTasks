@@ -143,11 +143,34 @@ configuration DhcpServer
     # if credentials specified, perform DHCP authorization
     if ($DomainCredential)
     {
-        xDhcpServerAuthorization "$($node.Name)_DhcpServerActivation"
+        # set the FQDN of the DHCP server
+        $dnsName = [System.Net.Dns]::GetHostByName("$($node.Name)").HostName
+
+        # create execution name for the resource
+        $executionName = "Activation_$("$($dnsName)" -replace '[-().:\s]', '_')"
+
+        $output = @"
+
+        Creating DSC resource for xDhcpServerAuthorization with the following values:
+
+        xDhcpServerAuthorization "$executionName"
         {
-            Ensure               = 'Present'
-            PsDscRunAsCredential = $DomainCredential
             IsSingleInstance     = 'Yes'
+            DnsName              = $dnsName
+            PsDscRunAsCredential = $DomainCredential
+            Ensure               = 'Present'
+            DependsOn            = $dependsOnAddDhcp
+        }
+"@
+
+        Write-Host $output -ForegroundColor Yellow
+
+        xDhcpServerAuthorization "$executionName"
+        {
+            IsSingleInstance     = 'Yes'
+            DnsName              = $dnsName
+            PsDscRunAsCredential = $DomainCredential
+            Ensure               = 'Present'
             DependsOn            = $dependsOnAddDhcp
         }
     }
@@ -236,7 +259,7 @@ configuration DhcpServer
         $myScope.DependsOn = $dependsOnAddDhcp
 
         # formulate execution name
-        $executionName = "$("$($myScope.Name)_$($s.Subnet)_$($myScope.LeaseDuration)" -replace '[()-.:/\s]', '_')"
+        $executionName = "$("$($myScope.Name)_$($s.Subnet)" -replace '[()-.:/\s]', '_')"
 
 
         $object = @"
@@ -412,7 +435,7 @@ configuration DhcpServer
 
                 Creating DSC resource for DhcpScopeOptionValue with the following values:
 
-                DhcpScopeOptionValue"$executionName"
+                DhcpScopeOptionValue "$executionName"
                 {
                     ScopeId       = $($o.ScopeId)
                     OptionId      = $($o.OptionId)
@@ -451,12 +474,16 @@ configuration DhcpServer
                 $r = @{ } + $r
 
                 # set the Scope ID for the exclusion range
-                $r.ScopeId = $myScope.ScopeId
+                $scopeId = $myScope.ScopeId
 
-                # the property 'Name' must be specified and must fall within the ScopeID range
+                # the property 'Name' must be specified
                 if (-not $r.ContainsKey('Name'))
                 {
                     throw 'ERROR: The property Name is not defined.'
+                }
+                else
+                {
+                    $name = $r.Name
                 }
 
                 # the property 'IPAddress' must be specified and must fall within the ScopeID range
@@ -468,35 +495,252 @@ configuration DhcpServer
                 {
                     throw "ERROR: The value $($r.IPAddress) is not a valid address."
                 }
-
-                # the property 'OptionId' must be specified and must fall within the ScopeID range
-                if (-not $r.ContainsKey('ClientMACAddress'))
+                else
                 {
-                    throw 'ERROR: The property ClientMACAddress is not defined.'
+                    $ipAddress = $r.IPAddress
+                }
+
+                # the property 'ClientId' must be specified
+                if (-not $r.ContainsKey('ClientId'))
+                {
+                    throw 'ERROR: The property ClientId is not defined.'
+                }
+                else
+                {
+                    $clientId = $r.ClientId
+                }
+
+                # if 'Type' not specified, default to 'Both'
+                if (-not $r.ContainsKey('Type'))
+                {
+                    $type = 'Both'
+                }
+
+                # if 'Description' not specified, default to empty string
+                if (-not $r.ContainsKey('Description'))
+                {
+                    $description = ''
                 }
 
                 # if 'Ensure' not specified, set to 'Present'
-                if (-not $o.ContainsKey('Ensure'))
+                if (-not $r.ContainsKey('Ensure'))
                 {
-                    $o.Ensure = 'Present'
+                    $ensure = 'Present'
                 }
-
-                # set the address family
-                $r.AddressFamily = $myScope.AddressFamily
 
                 # this resource depends on DHCP scope
-                $r.DependsOn = $dependsOnDhcpServerScope
+                #$dependsOn = $dependsOnDhcpServerScope
 
                 # formulate execution name
-                $executionName = "Reservation_$("$($r.ScopeId)_$($r.IPAddress)_$($r.ClientMACAddress)" -replace '[()-.:\s]', '_')"
-                # create DSC resource
-                $Splatting = @{
-                    ResourceName  = 'xDhcpServerReservation'
-                    ExecutionName = $executionName
-                    Properties    = $r
-                    NoInvoke      = $true
+                $executionName = "Reservation_$("$($scopeId)_$($ipAddress)_$($clientId)" -replace '[()-.:\s]', '_')"
+
+
+                $output = @"
+
+                Creating DSC resource for Script with the following values
+
+                Script "$executionName"
+                {
+                    GetScript = { return @{ result = 'N/A' }}
+                    SetScript = {
+                        ScopeId     = $scopeId
+                        ClientId    = $clientId
+                        IPAddress   = $ipAddress
+                        Name        = $name
+                        Type        = $type
+                        Description = $description
+                        Ensure      = $ensure
+                    }
+                    TestScript = {
+                        ScopeId     = $scopeId
+                        ClientId    = $clientId
+                        IPAddress   = $ipAddress
+                        Name        = $name
+                        Type        = $type
+                        Description = $description
+                        Ensure      = $ensure
+                    }
+                    DependsOn  = $dependsOnDhcpServerScope
                 }
-                (Get-DscSplattedResource @Splatting).Invoke($r)
+"@
+
+                Write-Host $output -ForegroundColor Yellow
+                <#
+                    Create DSC script resource for DhcpServerv4Reservation
+                #>
+                Script "$executionName"
+                {
+                    # Returns the current state of the Node
+                    GetScript  = { return @{ result = 'N/A' } }
+
+                    # Determine if the Reservation is in the desired state
+                    TestScript = {
+
+                        # stage boolean test variables
+                        [System.Boolean]$reservationExists = $false
+                        [System.Boolean]$isDesiredState = $false
+
+                        # splat the parameters for Get-DhcpServerv4Reservation
+                        $Splatting = @{
+                            ScopeId     = $using:scopeId
+                            ClientId    = $using:clientId
+                            ErrorAction = 'SilentlyContinue'
+                        }
+                        $reservation = Get-DhcpServerv4Reservation @Splatting
+
+
+                        # test if reservation exists
+                        if ($null -ne $reservation)
+                        {
+                            Write-Verbose "DHCP Reservation for '$using:clientId' is found"
+                            $reservationExists = $true
+                        }
+                        else
+                        {
+                            Write-Verbose "DHCP Reservation for '$using:clientId' it not found"
+                        }
+
+                        # if reservation exists, test the state of the object
+                        if ($reservationExists -and ($using:ensure -eq 'Present'))
+                        {
+                            # stage count for tests
+                            $count = 0
+
+                            # test if reservation name is in desired state
+                            Write-Verbose "Test DHCP Reservation for '$using:clientId' -> expect Name: '$using:name', actual Name: '$($reservation.Name)"
+                            if (($reservation.Name -eq $using:name))
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Name' is in desired state."
+                                $count++
+                            }
+                            else
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Name' is not in desired state."
+                            }
+
+                            # test if reservation IP address is in desired state
+                            Write-Verbose "Test DHCP Reservation for '$using:clientId' -> expect IPAddress: '$using:ipAddress', actual IPAddress: '$($reservation.IPAddress)"
+                            if (($reservation.IPAddress -eq $using:ipAddress))
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'IPAddress' is in desired state."
+                                $count++
+                            }
+                            else
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'IPAddress' is not in desired state."
+                            }
+
+                            # test if reservation Type is in desired state
+                            Write-Verbose "Test DHCP Reservation for '$using:clientId' -> expect Type: '$using:type', actual Type: '$($reservation.Type)"
+                            if (($reservation.Type -eq $using:type))
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Type' is in desired state."
+                                $count++
+                            }
+                            else
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Type' is not in desired state."
+                            }
+
+
+                            # test if reservation Description is in desired state
+                            Write-Verbose "Test DHCP Reservation for '$using:clientId' -> expect Description: '$using:description', actual Description: '$($reservation.Description)"
+                            if (($reservation.Description -eq $using:description))
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Description' is in desired state."
+                                $count++
+                            }
+                            else
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' property 'Description' is not in desired state."
+                            }
+
+                            # if count is 4, then resource is in desired state
+                            if ($count -eq 4)
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' is in desired state."
+                                $isDesiredState = $true
+                            }
+                            else
+                            {
+                                Write-Verbose "DHCP reservation for '$using:clientId' is not in desired state."
+                            }
+                        } #end if ($reservationExists)
+                        elseif ((-not $reservationExists) -and ($using:ensure -eq 'Absent'))
+                        {
+                            Write-Verbose "DHCP reservation for '$using:clientId' is in desired state."
+                            $isDesiredState = $true
+                        }
+
+                        return $isDesiredState
+                    } #end TestScript
+
+                    # Set the DHCP reservation
+                    SetScript  = {
+
+                        # splat the parameters for Get-DhcpServerv4Reservation
+                        $Splatting = @{
+                            ScopeId     = $using:scopeId
+                            ClientId    = $using:clientId
+                            ErrorAction = 'SilentlyContinue'
+                        }
+                        $reservation = Get-DhcpServerv4Reservation @Splatting
+
+
+                        # if resource should be Present
+                        if ($using:ensure -eq 'Present')
+                        {
+                            # if the reservation does not exists, create the reservation
+                            if ($null -eq $reservation)
+                            {
+                                Write-Verbose "Creating DHCP Reservation for '$using:clientId'"
+
+                                $Splatting = @{
+                                    ScopeId     = $using:scopeId
+                                    IPAddress   = $using:ipAddress
+                                    ClientId    = $using:clientId
+                                    Description = $using:description
+                                    Name        = $using:name
+                                    Type        = $using:type
+                                    Confirm     = $false
+                                    ErrorAction = 'SilentlyContinue'
+                                }
+                                Add-DhcpServerv4Reservation @Splatting
+                            }
+                            else
+                            {
+                                Write-Verbose "Setting DHCP Reservation for '$using:clientId'"
+
+                                $Splatting = @{
+                                    ClientId    = $using:clientId
+                                    IPAddress   = $using:ipAddress
+                                    Description = $using:description
+                                    Name        = $using:name
+                                    Type        = $using:type
+                                    Confirm     = $false
+                                    ErrorAction = 'SilentlyContinue'
+                                }
+                                Set-DhcpServerv4Reservation @Splatting
+                            }
+                        }
+                        elseif ($using:ensure -eq 'Absent')
+                        {
+                            Write-Verbose "Removing DHCP Reservation for '$using:clientId'"
+
+                            $Splatting = @{
+                                ClientId    = $using:clientId
+                                IPAddress   = $using:ipAddress
+                                ScopeId     = $using:scopeId
+                                Confirm     = $false
+                                ErrorAction = 'SilentlyContinue'
+                            }
+                            Remove-DhcpServerv4Reservation @Splatting
+
+                        }
+                    } #end SetScript
+
+                    DependsOn  = $dependsOnDhcpServerScope
+                } #end Script
             }
         } #end if ($s.OptionValues)
     }

@@ -1,0 +1,6 @@
+﻿NetAdapters:
+  - InterfaceAlias: Ethernet0
+    Ensure: Present
+
+  - InterfaceAlias: Ethernet1
+    Ensure: Present

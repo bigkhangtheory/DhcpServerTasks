@@ -2,73 +2,85 @@ configuration DhcpServerOptions
 {
     param
     (
-        [hashtable[]]
+        [Parameter()]
+        [System.Collections.Hashtable[]]
         $Options
     )
 
     <#
-    AddressFamily = [string]{ IPv4 }
-    OptionId = [UInt32]
-    UserClass = [string]
-    VendorClass = [string]
-    [DependsOn = [string[]]]
-    [Ensure = [string]{ Absent | Present }]
-    [PsDscRunAsCredential = [PSCredential]]
-    [Value = [string[]]]
-#>
-
+        Import required modules
+    #>
     Import-DscResource -ModuleName xDhcpServer
     Import-DscResource -ModuleName PsDesiredStateConfiguration
 
+
     # ensure Windows DHCP feature
-    WindowsFeature AddDhcp 
+    WindowsFeature AddDhcp
     {
         Name   = 'DHCP'
         Ensure = 'Present'
     }
+    $dependsOnAddDhcp = '[WindowsFeature]AddDhcp'
 
-    # iterate through each DHCP server option
-    foreach ($option in $Options)
+
+    if ($PSBoundParameters.ContainsKey('Options'))
     {
-        # remove case sensitivity of ordered Dictionary or Hashtables
-        $option = @{ } + $option
-
-        # if VendorClass not specified, set to Standard Class with empty string
-        if ($null -eq $option.VendorClass)
+        # iterate through each DHCP server option
+        foreach ($option in $Options)
         {
-            $option.VendorClass = ''
-        }
-        # if UserClass not specified, set to Standard Class with empty string
-        if ($null -eq $option.UserClass)
-        {
-            $option.UserClass = ''
-        }
+            # remove case sensitivity of ordered Dictionary or Hashtables
+            $option = @{ } + $option
 
-        # this configuration supports 'IPv4' only
-        if ($null -eq $option.AddressFamily)
-        {
-            $option.AddressFamily = 'IPv4'
-        }
+            # the property 'OptionId' must be specified, otherwise fail
+            if (-not $option.ContainsKey('OptionId'))
+            {
+                throw 'ERROR: The property OptionId is not defined.'
+            }
 
-        # if not specifed, ensure 'Present'
-        if (-not $option.ContainsKey('Ensure'))
-        {
-            $option.Ensure = 'Present'
-        }
+            # the property 'Value' must be specified, otherwise fail
+            if (-not $option.ContainsKey('Value'))
+            {
+                throw 'ERROR: The property Value is not defined.'
+            }
 
-        # this configuration depends on Windows DHCP server
-        $option.DependsOn = '[WindowsFeature]AddDhcp'
+            # if VendorClass not specified, set to Standard Class with empty string
+            if (-not $option.ContainsKey('VendorClass'))
+            {
+                $option.VendorClass = ''
+            }
 
-        # formulate execution name
-        $executionName = "$($node.Name)_$($option.OptionId)"
+            # if UserClass not specified, set to Standard Class with empty string
+            if (-not $option.ContainsKey('UserClass'))
+            {
+                $option.UserClass = ''
+            }
 
-        # create DSC configuration for DHCP server-wide option value
-        $Splatting = @{
-            ResourceName  = 'DhcpServerOptionValue'
-            ExecutionName = $executionName
-            Properties    = $option
-            NoInvoke      = $true
-        }
-        (Get-DscSplattedResource @Splatting).Invoke($option)
-    }
-}
+            # this configuration supports 'IPv4' only
+            if (-not $option.ContainsKey('AddressFamily'))
+            {
+                $option.AddressFamily = 'IPv4'
+            }
+
+            # if not specifed, ensure 'Present'
+            if (-not $option.ContainsKey('Ensure'))
+            {
+                $option.Ensure = 'Present'
+            }
+
+            # this configuration depends on Windows DHCP server
+            $option.DependsOn = '[WindowsFeature]AddDhcp'
+
+            # formulate execution name
+            $executionName = "$("$($node.Name)_$($option.OptionId)_$($option.Valud)" -replace '[-().:\s]', '_')"
+
+            # create DSC configuration for DHCP server-wide option value
+            $Splatting = @{
+                ResourceName  = 'DhcpServerOptionValue'
+                ExecutionName = $executionName
+                Properties    = $option
+                NoInvoke      = $true
+            }
+            (Get-DscSplattedResource @Splatting).Invoke($option)
+        } #end foreach
+    } #end if
+} #end configuration

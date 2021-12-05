@@ -1,4 +1,4 @@
-- NodeName: '*'
+- NodeName: "localhost"
   PSDscAllowPlainTextPassword: true
   PSDscAllowDomainUser: true
   Environment: Dev
