@@ -59,9 +59,6 @@
     # DSC Resources
     # -------------------------------------------------------------------------
 
-    ActiveDirectoryDsc           = '6.0.1'
-    # The ActiveDirectoryDsc module contains DSC resources for deployment and configuration of Active Directory.
-
     xDhcpServer                  = '2021.7.0'
     # This module contains DSC resources for deployment and configuration of Microsoft DHCP Serve
 

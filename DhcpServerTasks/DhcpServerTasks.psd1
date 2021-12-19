@@ -101,7 +101,7 @@
             # LicenseUri = ''
 
             # A URL to the main website for this project.
-            ProjectUri                 = 'https://prod1gitlab.mapcom.local/dsc/configurations/DhcpServerTasks.git'
+            ProjectUri                 = 'https://github.com/bigkhangtheory/DhcpServerTasks'
 
             # A URL to an icon representing this module.
             IconUri                    = 'https://dsccommunity.org/images/DSC_Logo_300p.png'

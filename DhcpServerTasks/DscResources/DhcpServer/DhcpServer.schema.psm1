@@ -112,6 +112,14 @@ configuration DhcpServer
     param
     (
         [Parameter()]
+        [System.Boolean]
+        $Authorization,
+
+        [Parameter()]
+        [System.Boolean]
+        $EnableSecurityGroups,
+
+        [Parameter()]
         [ValidateNotNullOrEmpty()]
         [System.Collections.Hashtable[]]
         $Scopes,
@@ -140,40 +148,82 @@ configuration DhcpServer
     }
     $dependsOnAddDhcp = '[WindowsFeature]AddDhcp'
 
-    # if credentials specified, perform DHCP authorization
-    if ($DomainCredential)
+    # perform DHCP authorization if specified
+    if ($PSBoundParameters.ContainsKey('Authorization'))
     {
+        # a credential must be specified
+        if (-not $PSBoundParameters.ContainsKey('DomainCredential'))
+        {
+            throw 'ERROR: DHCP Server authorization is specified, but a Credential is not found.'
+        }
+
         # set the FQDN of the DHCP server
         $dnsName = [System.Net.Dns]::GetHostByName("$($node.Name)").HostName
 
+        # if Authorization is $false, ensure the resource is 'Absent'
+        if ($PSBoundParameters['Authorization'] -eq $false)
+        {
+            $ensure = 'Absent'
+        }
+        else
+        {
+            $ensure = 'Present'
+        }
+
         # create execution name for the resource
-        $executionName = "Activation_$("$($dnsName)" -replace '[-().:\s]', '_')"
-
-        $output = @"
-
-        Creating DSC resource for xDhcpServerAuthorization with the following values:
+        $executionName = "Authorization_$("$($dnsName)_$($ensure)" -replace '[-().:\s]', '_')"
 
         xDhcpServerAuthorization "$executionName"
         {
             IsSingleInstance     = 'Yes'
             DnsName              = $dnsName
             PsDscRunAsCredential = $DomainCredential
-            Ensure               = 'Present'
+            Ensure               = $ensure
             DependsOn            = $dependsOnAddDhcp
         }
-"@
+    } #end Authorization
 
-        Write-Host $output -ForegroundColor Yellow
 
-        xDhcpServerAuthorization "$executionName"
+    # register local security groups for 'DHCP Administrators' and 'DHCP Users'
+    if ($PSBoundParameters.ContainsKey('EnableSecurityGroups'))
+    {
+        # create the local groups only if true
+        if ($PSBoundParameters['EnableSecurityGroups'])
         {
-            IsSingleInstance     = 'Yes'
-            DnsName              = $dnsName
-            PsDscRunAsCredential = $DomainCredential
-            Ensure               = 'Present'
-            DependsOn            = $dependsOnAddDhcp
+            ## create script resource for DHCP security groups
+            Script AddDhcpSecurityGroups
+            {
+                SetScript  = {
+                    # use netsh utility to create DHCP groups
+                    netsh dhcp add securitygroups
+
+                    # restart DHCP service
+                    Restart-Service -Name dhcpserver
+                }
+
+                TestScript = {
+
+                    Write-Verbose -Message "Checking for local groups 'DHCP Administrators' and 'DHCP Users'..."
+                    $checkDhcpAdministrators = Get-LocalGroup -Name 'DHCP Administrators'
+                    $checkDhcpUsers = Get-LocalGroup -Name 'DHCP Users'
+
+                    if ( ($null -eq $checkDhcpAdministrators) -or ($null -eq $checkDhcpUsers) )
+                    {
+                        Write-Verbose -Message "Checking for local groups 'DHCP Administrators' and 'DHCP Users'...MISSING."
+
+                        return $false
+                    }
+
+                    Write-Verbose -Message "Checking for local groups 'DHCP Administrators' and 'DHCP Users'...FOUND."
+                    return $true
+                }
+
+                GetScript  = { return @{ result = 'N/A' } }
+
+                DependsOn  = $dependsOnAddDhcp
+            }
         }
-    }
+    } #end EnableSecurityGroups
 
 
     <#
@@ -261,29 +311,6 @@ configuration DhcpServer
         # formulate execution name
         $executionName = "$("$($myScope.Name)_$($s.Subnet)" -replace '[()-.:/\s]', '_')"
 
-
-        $object = @"
-
-        Creating DSC resource for xDhcpServerScope with the following values:
-
-        xDhcpServerScope "$executionName"
-        {
-            ScopeId       = $($myScope.ScopeId)
-            Name          = $($myScope.Name)
-            SubnetMask    = $($myScope.SubnetMask)
-            IPStartRange  = $($myScope.IPStartRange)
-            IPEndRange    = $($myScope.IPEndRange)
-            LeaseDuration = $($myScope.LeaseDuration)
-            State         = $($myScope.State)
-            AddressFamily = $($myScope.AddressFamily)
-            Ensure        = $($myScope.Ensure)
-            DependsOn     = $($myScope.DependsOn)
-        }
-
-
-"@
-        Write-Host "$object" -ForegroundColor Yellow
-
         # create DSC resource
         $Splatting = @{
             ResourceName  = 'xDhcpServerScope'
@@ -297,6 +324,56 @@ configuration DhcpServer
         $dependsOnDhcpServerScope = "[xDhcpServerScope]$executionName"
 
 
+        <#
+            .NOTES
+            DNS Name Protection
+        #>
+        if ( ($myScope.Ensure -eq 'Present') -and ($s.ContainsKey('DnsNameProtection')) )
+        {
+            # stage variables
+            [System.String]$scopeId = $myScope.ScopeId
+            [System.Boolean]$dnsNameProtection = $s.DnsNameProtection
+
+            # create execution name for the script resource for DNS name protection
+            $executionName = "$($executionName)_DnsNameProtection"
+
+            # create a script resource to enable or disable DNS name protection
+            Script $executionName
+            {
+                SetScript  = {
+
+                    Write-Verbose "DHCP Scope: $using:scopeId -> set DNS NameProtection to $using:dnsNameProtection"
+
+                    Set-DhcpServerv4DnsSetting -ScopeId $using:scopeId -NameProtection $using:dnsNameProtection
+                }
+
+                TestScript = {
+
+                    Write-Verbose "DHCP Scope: $using:scopeId -> test DNS NameProtection: $using:dnsNameProtection"
+
+                    $dnsSetting = Get-DhcpServerv4DnsSetting -ScopeId $using:scopeId
+
+                    Write-Verbose "DNS setting: $(($dnsSetting | Select-Object -Property '*' -ExcludeProperty 'Cim*') -join ', ' | Out-String)"
+
+                    if ( ($null -ne $dnsSetting) -and ($dnsSetting.NameProtection -eq $using:dnsNameProtection) )
+                    {
+                        return $True
+                    }
+
+                    return $False
+                }
+
+                GetScript  = { return @{result = 'N/A' } }
+
+                DependsOn  = $dependsOnDhcpServerScope
+            }
+        } ##end DnsNameProtection
+
+
+        <#
+            .NOTES
+            DHCP Scope Exclusion Range
+        #>
         # Scope Exclusions - if specified, create DSC resource for DHCP scope exclusion ranges
         if ($s.ContainsKey('ExclusionRanges'))
         {
@@ -346,26 +423,6 @@ configuration DhcpServer
                 # formulate execution name
                 $executionName = "Exclusion_$("$($e.IPStarRange)_$($e.IPEndRange)" -replace '[()-.:\s]', '_')"
 
-
-
-                $object = @"
-
-                Creating DSC resource for DhcpServerExclusionRange with the following values:
-
-                DhcpServerExclusionRange "$executionName"
-                {
-                    ScopeId       = $($e.ScopeId)
-                    IPStartRange  = $($e.IPStartRange)
-                    IPEndRange    = $($e.IPEndRange)
-                    AddressFamily = $($e.AddressFamily)
-                    Ensure        = $($e.Ensure)
-                    DependsOn     = $($e.DependsOn)
-                }
-
-
-"@
-                Write-Host "$object" -ForegroundColor Yellow
-
                 # create DSC resource
                 $Splatting = @{
                     ResourceName  = 'DhcpServerExclusionRange'
@@ -377,6 +434,10 @@ configuration DhcpServer
             }
         }
 
+        <#
+            .NOTES
+            DHCP Scope Option Values
+        #>
         # Scope Options - if specified, create DSC resource for DHCP scope-level options
         if ($s.ContainsKey('OptionValues'))
         {
@@ -429,29 +490,6 @@ configuration DhcpServer
                 # formulate execution name
                 $executionName = "Option_$("$($o.ScopeId)_$($o.OptionId)_$($o.Value)" -replace '[()-.:\s]', '_')"
 
-
-
-                $object = @"
-
-                Creating DSC resource for DhcpScopeOptionValue with the following values:
-
-                DhcpScopeOptionValue "$executionName"
-                {
-                    ScopeId       = $($o.ScopeId)
-                    OptionId      = $($o.OptionId)
-                    Value         = $($o.Value)
-                    VendorClass   = $($o.VendorClass)
-                    UserClass     = $($o.UserClass)
-                    AddressFamily = $($o.AddressFamily)
-                    Ensure        = $($o.Ensure)
-                    DependsOn     = $($o.DependsOn)
-                }
-
-
-"@
-                Write-Host "$object" -ForegroundColor Yellow
-
-
                 # create DSC resource
                 $Splatting = @{
                     ResourceName  = 'DhcpScopeOptionValue'
@@ -464,6 +502,10 @@ configuration DhcpServer
         } #end if ($s.OptionValues)
 
 
+        <#
+            .NOTES
+            DHCP Scope Reservations
+        #>
         # Scope Options - if specified, create DSC resource for DHCP scope-level options
         if ($s.ContainsKey('Reservations'))
         {
@@ -534,37 +576,6 @@ configuration DhcpServer
                 # formulate execution name
                 $executionName = "Reservation_$("$($scopeId)_$($ipAddress)_$($clientId)" -replace '[()-.:\s]', '_')"
 
-
-                $output = @"
-
-                Creating DSC resource for Script with the following values
-
-                Script "$executionName"
-                {
-                    GetScript = { return @{ result = 'N/A' }}
-                    SetScript = {
-                        ScopeId     = $scopeId
-                        ClientId    = $clientId
-                        IPAddress   = $ipAddress
-                        Name        = $name
-                        Type        = $type
-                        Description = $description
-                        Ensure      = $ensure
-                    }
-                    TestScript = {
-                        ScopeId     = $scopeId
-                        ClientId    = $clientId
-                        IPAddress   = $ipAddress
-                        Name        = $name
-                        Type        = $type
-                        Description = $description
-                        Ensure      = $ensure
-                    }
-                    DependsOn  = $dependsOnDhcpServerScope
-                }
-"@
-
-                Write-Host $output -ForegroundColor Yellow
                 <#
                     Create DSC script resource for DhcpServerv4Reservation
                 #>
@@ -744,4 +755,4 @@ configuration DhcpServer
             }
         } #end if ($s.OptionValues)
     }
-}
+} #end configuration
